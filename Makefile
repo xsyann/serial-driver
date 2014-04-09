@@ -1,11 +1,11 @@
-##
-## Makefile for serial-driver
+###
+## Makefile
 ##
 ## Made by xsyann
 ## Contact <contact@xsyann.com>
 ##
-## Started on  Sat Apr  5 16:29:28 2014 xsyann
-## Last update Sat Apr  5 16:36:18 2014 xsyann
+## Started on  Wed Apr  9 14:05:43 2014 xsyann
+## Last update Wed Apr  9 14:05:47 2014 xsyann
 ##
 
 TARGET	= serial-driver
