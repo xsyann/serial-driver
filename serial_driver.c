@@ -5,133 +5,150 @@
 ** Contact <contact@xsyann.com>
 **
 ** Started on  Wed Apr  9 14:07:16 2014 xsyann
-** Last update Wed Apr  9 17:37:16 2014 xsyann
+** Last update Thu Apr 10 18:45:22 2014 xsyann
 */
 
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/fs.h>
-#include <linux/miscdevice.h>
-
-#define NAME "serial-driver"
+#include <linux/device.h>
+#include <linux/cdev.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Nicolas de Thore, Yann KOETH");
 MODULE_DESCRIPTION("Simple serial driver for linux kernel v3.11.0.19");
 MODULE_VERSION("0.1");
 
-static int major = 0; /* Major */
-static struct miscdevice md; /* Misc device handler */
+#define SD_DEVICE_NAME "serial-driver"
 
-/*
-  module_param(major, int, 0644);
-  MODULE_PARM_DESC(major, "Major number");
-*/
+#define SD_ERR_MAJOR "unable to get a major"
+#define SD_ERR_DEVADD "unable to add device"
+#define SD_ERR_DEVCREATE "unable to create device"
 
-static int serial_driver_open(struct inode *inode, struct file *file)
+#define SD_INFO_LOAD "loaded"
+#define SD_INFO_UNLOAD "unloaded"
+
+
+static struct class *sd_class;  /* Device class (/sys/class) */
+static struct cdev sd_cdev;     /* Character device struct (/dev) */
+static dev_t sd_dev;            /* Device number (major & minor) */
+
+
+static int sd_open(struct inode *inode, struct file *filp)
 {
-        printk(KERN_INFO "%s: open()\n", NAME);
+        printk(KERN_INFO "%s: open()\n", SD_DEVICE_NAME);
         return 0;
 }
 
-static int serial_driver_release(struct inode *inode, struct file *file)
+static int sd_release(struct inode *inode, struct file *filp)
 {
-        printk(KERN_INFO "%s: release()\n", NAME);
+        printk(KERN_INFO "%s: release()\n", SD_DEVICE_NAME);
         return 0;
 }
 
-static ssize_t serial_driver_read(struct file *file, char __user *buf,
+static ssize_t sd_read(struct file *filp, char __user *buf,
                               size_t count, loff_t *ppos)
 {
-        printk(KERN_INFO "%s: read()\n", NAME);
+        printk(KERN_INFO "%s: read()\n", SD_DEVICE_NAME);
         return count;
 }
 
-static ssize_t serial_driver_write(struct file *file, const char __user *buf,
+static ssize_t sd_write(struct file *filp, const char __user *buf,
                               size_t count, loff_t *ppos)
 {
-        printk(KERN_INFO "%s: write()\n", NAME);
+        printk(KERN_INFO "%s: write()\n", SD_DEVICE_NAME);
         return count;
 }
 
-static struct file_operations serial_driver_fops = {
+static struct file_operations sd_fops = {
         .owner = THIS_MODULE,
-        .read = serial_driver_read,
-        .write = serial_driver_write,
-        .open = serial_driver_open,
-        .release = serial_driver_release,
+        .read = sd_read,
+        .write = sd_write,
+        .open = sd_open,
+        .release = sd_release,
 };
 
-/* Alloc a minor of misc and create the node in /dev.
- *
- * misc_register() calls device_create().
- * device_create() creates a device and registers it with sysfs.
- * The entry created in /sys/class/misc allow the udev deamon
- * to create the node.
- */
-static int alloc_misc_minor(void)
+/* ************************************************************* */
+
+static int sd_create_device(void)
 {
-        int ret;
+        int err;
+        struct device *dev = NULL;
 
-        md.minor = MISC_DYNAMIC_MINOR;
-        md.name = NAME;
-        md.fops = &serial_driver_fops;
-        ret = misc_register(&md);
-        if (ret < 0)
-                printk(KERN_WARNING "%s: Unable to get a minor.\n", NAME);
-        else
-                printk(KERN_INFO "%s: Misc minor allocated.\n", NAME);
-        return ret;
-}
-
-/* Alloc a major. Need manual mknod. */
-static int alloc_major(void)
-{
-        int ret;
-        ret = register_chrdev(major, NAME, &serial_driver_fops);
-        if (ret < 0)
-                printk(KERN_WARNING "%s: Unable to get a major.\n", NAME);
-        else
-                printk(KERN_INFO "%s: Major %d allocated.\n", NAME, ret);
-                printk(KERN_INFO "%s: Do not forget to mknod /dev/%s c %d 0.\n",
-                       NAME, NAME, ret);
-        return ret;
-}
-
-/* Try to allocate a misc minor (to auto manage /dev/node).
- * On failure, try to allocate a new major.
- */
-static int __init init_serial_driver(void)
-{
-        int ret;
-
-        printk(KERN_INFO "%s: Loaded\n", NAME);
-
-        ret = alloc_misc_minor();
-        if (ret < 0)
-        {
-                major = alloc_major();
-                if (major < 0)
-                        return major;
+        cdev_init(&sd_cdev, &sd_fops);
+        err = cdev_add(&sd_cdev, sd_dev, 1);
+        if (err) {
+                printk(KERN_WARNING "%s: error %d: %s\n",
+                       SD_DEVICE_NAME, err, SD_ERR_DEVADD);
+                return err;
+        }
+        dev = device_create(sd_class, NULL, sd_dev, NULL, SD_DEVICE_NAME);
+        if (IS_ERR(dev)) {
+                err = PTR_ERR(dev);
+                printk(KERN_WARNING "%s: error %d: %s\n",
+                       SD_DEVICE_NAME, err, SD_ERR_DEVCREATE);
+                cdev_del(&sd_cdev);
+                return err;
         }
         return 0;
 }
 
-static void __exit cleanup_serial_driver(void)
+static void sd_destroy_device(void)
 {
-        printk(KERN_INFO "%s: Unloaded\n", NAME);
-        if (major == 0)
-        {
-                if (misc_deregister(&md) < 0)
-                {
-                        printk(KERN_WARNING "%s: Unable to unregister.\n", NAME);
-                        return;
-                }
-        }
-        else
-                unregister_chrdev(major, NAME);
+        device_destroy(sd_class, sd_dev);
+        cdev_del(&sd_cdev);
 }
 
-module_init(init_serial_driver);
-module_exit(cleanup_serial_driver);
+static void sd_cleanup(void)
+{
+        if (sd_class)
+                class_destroy(sd_class);
+        unregister_chrdev_region(sd_dev, 1);
+}
+
+static int sd_setup(void)
+{
+        int err = alloc_chrdev_region(&sd_dev, 0, 1, SD_DEVICE_NAME);
+        if (err < 0) {
+                printk(KERN_WARNING "%s: %s\n", SD_DEVICE_NAME, SD_ERR_MAJOR);
+                return err;
+        }
+        sd_class = class_create(THIS_MODULE, SD_DEVICE_NAME);
+        if (IS_ERR(sd_class)) {
+                err = PTR_ERR(sd_class);
+                sd_cleanup();
+                return err;
+        }
+        return 0;
+}
+
+/* ************************************************************* */
+
+static int __init sd_init_module(void)
+{
+        int err;
+
+        printk(KERN_INFO "%s: %s\n", SD_DEVICE_NAME, SD_INFO_LOAD);
+        if ((err = sd_setup())) {
+                sd_cleanup();
+                return err;
+        }
+        if ((err = sd_create_device())) {
+                sd_cleanup();
+                return err;
+        }
+        printk(KERN_INFO "%s: %d:%d\n",
+               SD_DEVICE_NAME, MAJOR(sd_dev), MINOR(sd_dev));
+        return 0;
+}
+
+static void __exit sd_exit_module(void)
+{
+        printk(KERN_INFO "%s: %s\n", SD_DEVICE_NAME, SD_INFO_UNLOAD);
+        sd_destroy_device();
+        sd_cleanup();
+}
+
+module_init(sd_init_module);
+module_exit(sd_exit_module);

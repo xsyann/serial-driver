@@ -1,11 +1,11 @@
-###
+##
 ## Makefile
 ##
 ## Made by xsyann
 ## Contact <contact@xsyann.com>
 ##
 ## Started on  Wed Apr  9 14:05:43 2014 xsyann
-## Last update Wed Apr  9 14:05:47 2014 xsyann
+## Last update Thu Apr 10 20:28:26 2014 xsyann
 ##
 
 TARGET	= serial-driver
@@ -21,3 +21,9 @@ all	:
 
 clean	:
 	$(MAKE) -C $(KDIR) M=$(PWD) clean
+
+load	:
+	sudo insmod ./$(TARGET).ko
+
+unload	:
+	sudo rmmod ./$(TARGET).ko
