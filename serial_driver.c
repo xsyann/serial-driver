@@ -5,7 +5,7 @@
 ** Contact <contact@xsyann.com>
 **
 ** Started on  Wed Apr  9 14:07:16 2014 xsyann
-** Last update Fri Apr 11 15:47:20 2014 xsyann
+** Last update Fri Apr 11 16:31:29 2014 xsyann
 */
 
 #include <linux/kernel.h>
@@ -16,6 +16,7 @@
 #include <linux/device.h>
 #include <linux/cdev.h>
 #include <linux/semaphore.h>
+#include <linux/uaccess.h>
 
 #include "serial_driver.h"
 
@@ -84,6 +85,16 @@ static ssize_t sd_read(struct file *filp, char __user *buf,
                               size_t count, loff_t *ppos)
 {
         printk(KERN_INFO "%s: read()\n", SD_DEVICE_NAME);
+
+        if (*ppos >= SD_BUFFER_SIZE) /* End of buffer */
+                return 0;
+        if (*ppos + count > SD_BUFFER_SIZE) /* Partial read to the end */
+                count = SD_BUFFER_SIZE - *ppos;
+
+
+        if (copy_to_user(buf, &sd_dev->data[*ppos], count) != 0)
+                return -EFAULT;
+        *ppos += count;
         return count;
 }
 
@@ -91,6 +102,15 @@ static ssize_t sd_write(struct file *filp, const char __user *buf,
                               size_t count, loff_t *ppos)
 {
         printk(KERN_INFO "%s: write()\n", SD_DEVICE_NAME);
+
+        if (*ppos >= SD_BUFFER_SIZE) /* Out of buffer */
+                return -EINVAL;
+        if (*ppos + count > SD_BUFFER_SIZE) /* Partial write to the end */
+                count = SD_BUFFER_SIZE - *ppos;
+
+        if (copy_from_user(&sd_dev->data[*ppos], buf, count) != 0)
+                return -EFAULT;
+        *ppos += count;
         return count;
 }
 
