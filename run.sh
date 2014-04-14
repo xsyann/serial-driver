@@ -6,13 +6,15 @@
 ## Contact <contact@xsyann.com>
 ##
 ## Started on  Thu Apr 10 20:28:06 2014 xsyann
-## Last update Fri Apr 11 16:45:49 2014 xsyann
+## Last update Mon Apr 14 20:45:04 2014 xsyann
 ##
+
+module="serial_driver"
 
 echo "   ┌───────────────────────────────────────────────────┐"
 echo "-> │            $ insmod serial-driver.ko              │"
 echo "   └───────────────────────────────────────────────────┘"
-sudo insmod serial-driver.ko
+sudo insmod ${module}.ko
 echo "   ┌───────────────────────────────────────────────────┐"
 echo "-> │      $ cat /proc/devices | grep serial-driver     │"
 echo "   └───────────────────────────────────────────────────┘"
@@ -20,26 +22,19 @@ cat /proc/devices | grep "serial"
 echo "   ┌───────────────────────────────────────────────────┐"
 echo "-> │            $ ll /sys/class/serial-driver          │"
 echo "   └───────────────────────────────────────────────────┘"
-ls -l /sys/class/serial-driver/
+ls -l /sys/class/${module}/
 echo "   ┌───────────────────────────────────────────────────┐"
 echo "-> │ $ cat /sys/class/serial-driver/serial-driver/dev  │"
 echo "   └───────────────────────────────────────────────────┘"
-cat /sys/class/serial-driver/serial-driver/dev
+cat /sys/class/${module}/${module}/dev
 echo "   ┌───────────────────────────────────────────────────┐"
 echo "-> │           $ ls /dev | grep serial-driver          │"
 echo "   └───────────────────────────────────────────────────┘"
-ls -l /dev | grep "serial"
-echo "   ┌───────────────────────────────────────────────────┐"
-echo "-> │                     Test                          │"
-echo "   └───────────────────────────────────────────────────┘"
-echo "-> Write"
-echo "foobar" > /dev/serial-driver
-echo "-> Read"
-dd bs=10 count=1 < /dev/serial-driver 2> /dev/null
+ls -l /dev | grep ${module}
 echo "   ┌───────────────────────────────────────────────────┐"
 echo "-> │               # rmmod serial-driver               │"
 echo "   └───────────────────────────────────────────────────┘"
-sudo rmmod serial-driver
+sudo rmmod ${module}.ko
 echo "   ┌───────────────────────────────────────────────────┐"
 echo "-> │                      $ dmesg                      │"
 echo "   └───────────────────────────────────────────────────┘"
