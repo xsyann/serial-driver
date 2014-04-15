@@ -5,7 +5,7 @@
 ** Contact <contact@xsyann.com>
 **
 ** Started on  Fri Apr 11 12:14:27 2014 xsyann
-** Last update Tue Apr 15 15:44:30 2014 xsyann
+** Last update Tue Apr 15 16:19:10 2014 xsyann
 */
 
 #ifndef         __SERIAL_DRIVER_H__
@@ -50,6 +50,8 @@ struct sd_dev
         struct mutex write_mutex;
         wait_queue_head_t read_wq;
         wait_queue_head_t write_wq;
+        unsigned long tx;
+        unsigned long rx;
 };
 
 #endif          /* __SERIAL_DRIVER_H__ */

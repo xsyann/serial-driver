@@ -5,7 +5,7 @@
 ** Contact <contact@xsyann.com>
 **
 ** Started on  Wed Apr  9 14:07:16 2014 xsyann
-** Last update Tue Apr 15 15:42:23 2014 xsyann
+** Last update Tue Apr 15 20:31:03 2014 xsyann
 */
 
 #include <linux/kernel.h>
@@ -19,6 +19,8 @@
 #include <linux/sched.h>
 #include <linux/interrupt.h>
 #include <linux/serial_reg.h>
+#include <linux/seq_file.h>
+#include <linux/proc_fs.h>
 
 #include "serial_driver.h"
 
@@ -30,7 +32,7 @@ MODULE_VERSION(SD_VERSION);
 static struct class *sd_class = NULL;   /* Device class (/sys/class) */
 static struct sd_dev *sd_dev = NULL;    /* Devices wrappers */
 static int sd_major = 0;                /* Major number */
-static int sd_ndevs = SD_NCOM;           /* Number of Devices */
+static int sd_ndevs = SD_NCOM;          /* Number of Devices */
 
 static const struct sd_com_info sd_ports[SD_NCOM] = {
         {0, 0x3f8, 4}, /* COM1 */
@@ -57,6 +59,7 @@ static int sd_open(struct inode *inode, struct file *filp)
 {
         unsigned int major = 0;
         unsigned int minor = 0;
+        struct sd_dev *dev;
 
         major = imajor(inode);
         minor = iminor(inode);
@@ -68,11 +71,20 @@ static int sd_open(struct inode *inode, struct file *filp)
                 return -ENODEV;
         }
         PR_INFO("open()");
+        dev = sd_get_device(minor);
+        /* Data terminal ready | Request to send */
+        outb(UART_MCR_DTR | UART_MCR_RTS | UART_MCR_OUT2,
+             dev->com.uart_port + UART_MCR);
         return 0;
 }
 
 static int sd_release(struct inode *inode, struct file *filp)
 {
+        int minor = iminor(inode);
+        struct sd_dev *dev = sd_get_device(minor);
+        int port = dev->com.uart_port;
+        /* Not ready */
+        outb(0x00, port + UART_MCR);
         PR_INFO("release()");
         return 0;
 }
@@ -117,6 +129,7 @@ static ssize_t sd_read(struct file *filp, char __user *buf,
                 if ((inb(port + UART_LSR) & UART_LSR_DR) == 0)
                         break;
         }
+        dev->rx += copied;
         /* Unlock */
         mutex_unlock(&dev->read_mutex);
         return copied;
@@ -165,9 +178,10 @@ static ssize_t sd_write(struct file *filp, const char __user *buf,
                 if ((inb(port + UART_MSR) & UART_MSR_CTS) != UART_MSR_CTS)
                         break;
         }
+        dev->tx += copied;
         /* Unlock */
         mutex_unlock(&dev->read_mutex);
-        return count;
+        return copied;
 }
 
 unsigned int sd_poll(struct file *filp, struct poll_table_struct *pt)
@@ -195,13 +209,69 @@ unsigned int sd_poll(struct file *filp, struct poll_table_struct *pt)
         return mask;
 }
 
-static struct file_operations sd_fops = {
+static const struct file_operations sd_fops = {
         .owner = THIS_MODULE,
         .read = sd_read,
         .write = sd_write,
         .open = sd_open,
         .poll = sd_poll,
         .release = sd_release,
+};
+
+/* ************************************************************* */
+
+static void sd_proc_show_status_flag(struct seq_file *sfile,
+                                     int predicate, const char *name, char *sep)
+{
+        if (predicate)
+        {
+                seq_printf(sfile, "%c%s", *sep, name);
+                *sep = '|';
+        }
+}
+
+static void sd_proc_show_status(struct seq_file *sfile, int msr, int mcr)
+{
+        char sep = ' ';
+
+        sd_proc_show_status_flag(sfile, mcr & UART_MCR_RTS, "RTS", &sep);
+        sd_proc_show_status_flag(sfile, msr & UART_MSR_CTS, "CTS", &sep);
+        sd_proc_show_status_flag(sfile, mcr & UART_MCR_DTR, "DTR", &sep);
+        sd_proc_show_status_flag(sfile, msr & UART_MSR_DSR, "DSR", &sep);
+        sd_proc_show_status_flag(sfile, msr & UART_MSR_DCD, "CD", &sep);
+        sd_proc_show_status_flag(sfile, msr & UART_MSR_RI, "RI", &sep);
+}
+
+static int sd_proc_show(struct seq_file *sfile, void *v)
+{
+        int i;
+        int mcr;
+        int msr;
+        struct sd_dev *dev = NULL;
+
+        for (i = 0; i < sd_ndevs; ++i)
+        {
+                dev = sd_get_device(i);
+                mcr = inb(dev->com.uart_port + UART_MCR);
+                msr = inb(dev->com.uart_port + UART_MSR);
+                seq_printf(sfile, "%d: port: %08X irq: %d tx:%ld rx:%ld",
+                           i, dev->com.uart_port, dev->com.irq, dev->tx, dev->rx);
+                sd_proc_show_status(sfile, msr, mcr);
+                seq_printf(sfile, "\n");
+        }
+        return 0;
+}
+
+static int sd_proc_open(struct inode *inode, struct file *file)
+{
+        return single_open(file, sd_proc_show, NULL);
+}
+
+static const struct file_operations sd_proc_fops = {
+        .open = sd_proc_open,
+        .read = seq_read,
+        .llseek = seq_lseek,
+        .release = single_release,
 };
 
 /* ************************************************************* */
@@ -254,8 +324,6 @@ static int uart_config(struct sd_dev *dev)
         outb(0x00, port + UART_DLM);
         outb(UART_LCR_WLEN8, port + UART_LCR);
 
-        outb(UART_MCR_DTR | UART_MCR_RTS, port + UART_MCR);
-
         /* RO registers */
         inb(port + UART_MSR);
         inb(port + UART_LSR);
@@ -268,7 +336,6 @@ static int uart_config(struct sd_dev *dev)
                 return err;
         }
 
-        outb(UART_MCR_DTR | UART_MCR_RTS | UART_MCR_OUT2, port + UART_MCR);
         outb(UART_IER_RDI | UART_IER_RLSI | UART_IER_THRI, port + UART_IER);
 
         return err;
@@ -301,6 +368,8 @@ static void sd_dev_init(struct sd_dev *dev, int minor)
 {
         int i;
 
+        dev->tx = 0;
+        dev->rx = 0;
         dev->devno = MKDEV(sd_major, minor);
         mutex_init(&dev->read_mutex);
         mutex_init(&dev->write_mutex);
@@ -367,15 +436,21 @@ static void sd_cleanup_driver(int ndev)
         if (sd_class != NULL)
                 class_destroy(sd_class);
         unregister_chrdev_region(MKDEV(sd_major, 0), sd_ndevs);
+        remove_proc_entry(KBUILD_MODNAME, NULL);
 }
 
-/* Register char device (dynamic major).
+/*
+ * Create proc entry
+ * Register char device (dynamic major).
  * Create device class.
  */
 static int sd_create_driver(void)
 {
         int err = 0;
         dev_t first;
+
+       if (proc_create(KBUILD_MODNAME, 0, NULL, &sd_proc_fops) == NULL)
+                return -ENOMEM;
 
         /* Start with minor 0, register n devices */
         err = alloc_chrdev_region(&first, 0, sd_ndevs, KBUILD_MODNAME);
