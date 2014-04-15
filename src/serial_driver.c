@@ -5,7 +5,7 @@
 ** Contact <contact@xsyann.com>
 **
 ** Started on  Wed Apr  9 14:07:16 2014 xsyann
-** Last update Tue Apr 15 20:31:03 2014 xsyann
+** Last update Tue Apr 15 22:14:49 2014 xsyann
 */
 
 #include <linux/kernel.h>
@@ -65,8 +65,7 @@ static int sd_open(struct inode *inode, struct file *filp)
         minor = iminor(inode);
         /* Check minor and major */
         if (major != sd_major || minor < 0 ||
-            minor > sd_ndevs)
-        {
+            minor > sd_ndevs) {
                 PR_WARNING(SD_ERR_NOTFOUND, major, minor);
                 return -ENODEV;
         }
@@ -153,8 +152,7 @@ static ssize_t sd_write(struct file *filp, const char __user *buf,
 
         modem_status = inb(port + UART_MSR);
         /* Clear To Send */
-        if ((modem_status & UART_MSR_CTS) != UART_MSR_CTS)
-        {
+        if ((modem_status & UART_MSR_CTS) != UART_MSR_CTS) {
                 if (filp->f_flags & O_NONBLOCK)
                         return -EAGAIN;
                 err = wait_event_interruptible(
@@ -223,8 +221,7 @@ static const struct file_operations sd_fops = {
 static void sd_proc_show_status_flag(struct seq_file *sfile,
                                      int predicate, const char *name, char *sep)
 {
-        if (predicate)
-        {
+        if (predicate) {
                 seq_printf(sfile, "%c%s", *sep, name);
                 *sep = '|';
         }
@@ -249,8 +246,7 @@ static int sd_proc_show(struct seq_file *sfile, void *v)
         int msr;
         struct sd_dev *dev = NULL;
 
-        for (i = 0; i < sd_ndevs; ++i)
-        {
+        for (i = 0; i < sd_ndevs; ++i) {
                 dev = sd_get_device(i);
                 mcr = inb(dev->com.uart_port + UART_MCR);
                 msr = inb(dev->com.uart_port + UART_MSR);
@@ -291,8 +287,7 @@ static const struct file_operations sd_proc_fops = {
         if (interrupt_id & UART_IIR_NO_INT)
                 return IRQ_NONE;
 
-        switch (interrupt_id)
-        {
+        switch (interrupt_id) {
         case 0x0C: /* Character timeout */
         case UART_IIR_RDI: /* Received data available */
                 wake_up_interruptible(&dev->read_wq);
