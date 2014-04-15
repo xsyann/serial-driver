@@ -5,7 +5,7 @@
 ** Contact <contact@xsyann.com>
 **
 ** Started on  Fri Apr 11 12:14:27 2014 xsyann
-** Last update Tue Apr 15 16:19:10 2014 xsyann
+** Last update Tue Apr 15 22:09:56 2014 xsyann
 */
 
 #ifndef         __SERIAL_DRIVER_H__
@@ -29,7 +29,7 @@
         (printk(KERN_WARNING "%s: error: " ERR "\n", KBUILD_MODNAME, ##__VA_ARGS__))
 
 #define PR_INFO(INFO, ...) \
-        (printk(KERN_WARNING "%s: " INFO "\n", KBUILD_MODNAME, ##__VA_ARGS__))
+        (printk(KERN_INFO "%s: " INFO "\n", KBUILD_MODNAME, ##__VA_ARGS__))
 
 #define SD_NCOM 4
 
