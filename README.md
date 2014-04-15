@@ -41,18 +41,37 @@ http://www.dest-unreach.org/socat/download/socat-2.0.0-b7.tar.gz
 ## Test
 
 ####Configure VM serial port
-- Virtual Machine > Settings > Add Device... > Serial Port > Add...
-- Save As : `/tmp/com2`
 - Open `Virtual Machines.localized/[vm-name].vmwarevm/[vm-name].vmx`
-- Change `serial1.fileType = "file"` to `serial.fileType = "pipe"`
+- Remove all existing serial ports
+
+- Add 4 serial ports
+
+        serial0.present = "TRUE"
+        serial0.fileName = "/tmp/com1"
+        serial0.fileType = "pipe"
+        serial1.present = "TRUE"
+        serial1.fileType = "pipe"
+        serial1.fileName = "/tmp/com2"
+        serial2.present = "TRUE"
+        serial2.fileType = "pipe"
+        serial2.fileName = "/private/tmp/com3"
+        serial3.present = "TRUE"
+        serial3.fileType = "pipe"
+        serial3.fileName = "/private/tmp/com4"
 
 ####Host
-`user@host$ socat unix-connect:/tmp/com2 stdio`
+    user@host$ socat unix-connect:/tmp/com1 stdio
 
 ####Guest
-`user@guest$ cutecom`
+    user@guest$ cutecom &
 
-`Device : /dev/serial_driver`
+`Device : /dev/serial_driver0`
+
+    user@guest$ cat /proc/serial_driver
+    0: port: 000003F8 irq: 4 tx:0 rx:36 RTS|CTS|DTR|DSR|CD
+    1: port: 000002F8 irq: 3 tx:0 rx:0
+    2: port: 000003E8 irq: 4 tx:0 rx:0
+    3: port: 000002E8 irq: 3 tx:0 rx:0
 
   
   
