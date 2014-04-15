@@ -5,7 +5,7 @@
 ** Contact <contact@xsyann.com>
 **
 ** Started on  Wed Apr  9 14:07:16 2014 xsyann
-** Last update Tue Apr 15 10:08:41 2014 xsyann
+** Last update Tue Apr 15 15:42:23 2014 xsyann
 */
 
 #include <linux/kernel.h>
@@ -28,10 +28,30 @@ MODULE_DESCRIPTION(SD_DESC);
 MODULE_VERSION(SD_VERSION);
 
 static struct class *sd_class = NULL;   /* Device class (/sys/class) */
-static struct sd_data *sd_data = NULL;    /* Device wrapper */
+static struct sd_dev *sd_dev = NULL;    /* Devices wrappers */
+static int sd_major = 0;                /* Major number */
+static int sd_ndevs = SD_NCOM;           /* Number of Devices */
 
-static int port = 0x2f8; /* COM2 */
-static int irq = 3;
+static const struct sd_com_info sd_ports[SD_NCOM] = {
+        {0, 0x3f8, 4}, /* COM1 */
+        {1, 0x2f8, 3}, /* COM2 */
+        {2, 0x3e8, 4}, /* COM3 */
+        {3, 0x2e8, 3}, /* COM4 */
+};
+
+/* ************************************************************ */
+
+static struct sd_dev *sd_get_device(int minor)
+{
+        int i;
+
+        for (i = 0; i < sd_ndevs; ++i)
+                if (MINOR(sd_dev[i].devno) == minor)
+                        return &sd_dev[i];
+        return NULL;
+}
+
+/* ************************************************************ */
 
 static int sd_open(struct inode *inode, struct file *filp)
 {
@@ -41,8 +61,8 @@ static int sd_open(struct inode *inode, struct file *filp)
         major = imajor(inode);
         minor = iminor(inode);
         /* Check minor and major */
-        if (MKDEV(major, minor) != sd_data->devno ||
-            inode->i_cdev != &sd_data->cdev)
+        if (major != sd_major || minor < 0 ||
+            minor > sd_ndevs)
         {
                 PR_WARNING(SD_ERR_NOTFOUND, major, minor);
                 return -ENODEV;
@@ -64,22 +84,30 @@ static ssize_t sd_read(struct file *filp, char __user *buf,
         int err;
         ssize_t copied;
         unsigned int i;
-        int line_status = inb(port + UART_LSR);
+        int line_status;
+        struct sd_dev *dev;
+        int port;
 
-        PR_INFO("read()");
+        /* Get device */
+        dev = sd_get_device(iminor(filp->f_path.dentry->d_inode));
+        port = dev->com.uart_port;
+        PR_INFO("read() %d", MINOR(dev->devno));
 
+        line_status = inb(port + UART_LSR);
         /* Data not ready */
         if ((line_status & UART_LSR_DR) == 0) {
                 if (filp->f_flags & O_NONBLOCK)
                         return -EAGAIN;
-                err = wait_event_interruptible(sd_data->read_wq,
+                err = wait_event_interruptible(dev->read_wq,
                                                inb(port + UART_LSR) & 1);
                 if (err == -ERESTARTSYS)
                         return -EINTR;
         }
 
-        if (mutex_lock_interruptible(&sd_data->read_mutex))
+        /* Lock */
+        if (mutex_lock_interruptible(&dev->read_mutex))
                 return -EINTR;
+        /* Read */
         copied = 0;
         for (i = 0; i < count; ++i) {
                 c = inb(port + UART_RX);
@@ -89,7 +117,8 @@ static ssize_t sd_read(struct file *filp, char __user *buf,
                 if ((inb(port + UART_LSR) & UART_LSR_DR) == 0)
                         break;
         }
-        mutex_unlock(&sd_data->read_mutex);
+        /* Unlock */
+        mutex_unlock(&dev->read_mutex);
         return copied;
 }
 
@@ -100,24 +129,32 @@ static ssize_t sd_write(struct file *filp, const char __user *buf,
         int err;
         unsigned int i;
         ssize_t copied;
-        int modem_status = inb(port + UART_MSR);
+        int modem_status;
+        struct sd_dev *dev;
+        int port;
 
-        PR_INFO("write()");
+        /* Get device */
+        dev = sd_get_device(iminor(filp->f_path.dentry->d_inode));
+        port = dev->com.uart_port;
+        PR_INFO("write() %d", MINOR(dev->devno));
 
+        modem_status = inb(port + UART_MSR);
         /* Clear To Send */
         if ((modem_status & UART_MSR_CTS) != UART_MSR_CTS)
         {
                 if (filp->f_flags & O_NONBLOCK)
                         return -EAGAIN;
                 err = wait_event_interruptible(
-                        sd_data->write_wq,
+                        dev->write_wq,
                         (inb(port + UART_MSR) & UART_MSR_CTS) == UART_MSR_CTS);
                 if (err == -ERESTARTSYS)
                         return -EINTR;
         }
 
-        if (mutex_lock_interruptible(&sd_data->read_mutex))
+        /* Lock */
+        if (mutex_lock_interruptible(&dev->read_mutex))
                 return -EINTR;
+        /* Write */
         copied = 0;
         for (i = 0; i < count; ++i) {
                 if (copy_from_user(&c, buf + i, 1))
@@ -128,17 +165,24 @@ static ssize_t sd_write(struct file *filp, const char __user *buf,
                 if ((inb(port + UART_MSR) & UART_MSR_CTS) != UART_MSR_CTS)
                         break;
         }
-
-        mutex_unlock(&sd_data->read_mutex);
+        /* Unlock */
+        mutex_unlock(&dev->read_mutex);
         return count;
 }
 
 unsigned int sd_poll(struct file *filp, struct poll_table_struct *pt)
 {
-        unsigned int    mask = 0;
+        unsigned int mask = 0;
+        struct sd_dev *dev;
+        int port;
 
-        poll_wait(filp, &sd_data->read_wq, pt);
-        poll_wait(filp, &sd_data->write_wq, pt);
+        /* Get Device */
+        dev = sd_get_device(iminor(filp->f_path.dentry->d_inode));
+        port = dev->com.uart_port;
+
+        /* Enqueue current process */
+        poll_wait(filp, &dev->read_wq, pt);
+        poll_wait(filp, &dev->write_wq, pt);
 
         /* Receiver data ready */
         if (inb(port + UART_LSR) & UART_LSR_DR)
@@ -162,9 +206,17 @@ static struct file_operations sd_fops = {
 
 /* ************************************************************* */
 
-static irqreturn_t sd_isr(int irq, void *dev_id)
+ irqreturn_t sd_isr(int irq, void *dev_id)
 {
-        int interrupt_id = inb(port + UART_IIR) & UART_IIR_ID;
+        int port;
+        int interrupt_id;
+        struct sd_dev *dev = (struct sd_dev *)dev_id;
+
+        if (dev == NULL)
+                return IRQ_NONE;
+        port = dev->com.uart_port;
+
+        interrupt_id = inb(port + UART_IIR) & UART_IIR_ID;
         /* No interrupts pending */
         if (interrupt_id & UART_IIR_NO_INT)
                 return IRQ_NONE;
@@ -173,10 +225,10 @@ static irqreturn_t sd_isr(int irq, void *dev_id)
         {
         case 0x0C: /* Character timeout */
         case UART_IIR_RDI: /* Received data available */
-                wake_up_interruptible(&sd_data->read_wq);
+                wake_up_interruptible(&dev->read_wq);
                 break;
         case UART_IIR_THRI: /* Transmitter holding register empty */
-                wake_up_interruptible(&sd_data->write_wq);
+                wake_up_interruptible(&dev->write_wq);
                 break;
         case UART_IIR_RLSI: /* Receiver line status interrupt */
                 inb(port + UART_LSR);
@@ -188,9 +240,10 @@ static irqreturn_t sd_isr(int irq, void *dev_id)
         return IRQ_HANDLED;
 }
 
-static int uart_config(void)
+static int uart_config(struct sd_dev *dev)
 {
         int err = 0;
+        int port = dev->com.uart_port;
 
         outb(0, port + UART_IER);
         outb(UART_FCR_ENABLE_FIFO | UART_FCR_CLEAR_RCVR |
@@ -209,7 +262,7 @@ static int uart_config(void)
         inb(port + UART_RX);
         inb(port + UART_IIR);
 
-        err = request_irq(irq, sd_isr, IRQF_SHARED, KBUILD_MODNAME, THIS_MODULE);
+        err = request_irq(dev->com.irq, sd_isr, IRQF_SHARED, dev->name, dev);
         if (err < 0) {
                 PR_WARNING(SD_ERR_UARTFAIL);
                 return err;
@@ -221,46 +274,54 @@ static int uart_config(void)
         return err;
 }
 
-static void uart_clean(void)
+static void uart_clean(struct sd_dev *dev)
 {
+        int port = dev->com.uart_port;
+
         outb(0, port + UART_FCR);
         outb(0, port + UART_MCR);
         outb(0, port + UART_IER);
-        free_irq(irq, THIS_MODULE);
+        free_irq(dev->com.irq, dev);
 }
 
 /* ************************************************************* */
 
-static int sd_alloc_device(struct sd_data **dev)
+/* Alloc a device wrapper array */
+static int sd_alloc_devices(struct sd_dev **dev)
 {
-        *dev = kzalloc(sizeof(**dev), GFP_KERNEL);
+        *dev = kzalloc(sd_ndevs * sizeof(**dev), GFP_KERNEL);
         if (*dev == NULL) {
                 return -ENOMEM;
         }
         return 0;
 }
 
-static void sd_free_device(struct sd_data *dev)
+/* Initialize a device wrapper */
+static void sd_dev_init(struct sd_dev *dev, int minor)
 {
-        if (dev)
-                kfree(dev);
+        int i;
+
+        dev->devno = MKDEV(sd_major, minor);
+        mutex_init(&dev->read_mutex);
+        mutex_init(&dev->write_mutex);
+        init_waitqueue_head(&dev->read_wq);
+        init_waitqueue_head(&dev->write_wq);
+
+        for (i = 0; i < sd_ndevs; ++i)
+                if (sd_ports[i].id == minor)
+                        dev->com = sd_ports[i];
 }
 
 /* Add char device to system
  * Call device_create() to auto create (udev daemon)
  * the node in /dev.
  */
-static int sd_create_device(struct sd_data *dev, int major, int minor,
-                            struct class *class)
+static int sd_create_device(struct sd_dev *dev, int minor)
 {
         int err = 0;
         struct device *device = NULL;
 
-        dev->devno = MKDEV(major, minor);
-        mutex_init(&sd_data->read_mutex);
-        mutex_init(&sd_data->write_mutex);
-        init_waitqueue_head(&dev->read_wq);
-        init_waitqueue_head(&dev->write_wq);
+        sd_dev_init(dev, minor);
 
         cdev_init(&dev->cdev, &sd_fops);
         err = cdev_add(&dev->cdev, dev->devno, 1);
@@ -269,112 +330,111 @@ static int sd_create_device(struct sd_data *dev, int major, int minor,
                 return err;
         }
 
-        device = device_create(class, NULL, dev->devno, NULL, KBUILD_MODNAME);
+        device = device_create(sd_class, NULL, dev->devno, NULL, KBUILD_MODNAME "%d", minor);
         if (IS_ERR(device)) {
                 err = PTR_ERR(device);
                 PR_WARNING(SD_ERR_DEVCREATE);
                 cdev_del(&dev->cdev);
                 return err;
         }
+
+        dev->name = dev_name(device);
+        uart_config(dev);
+
         return 0;
 }
 
-static void sd_destroy_device(struct sd_data *dev)
+static void sd_destroy_device(struct sd_dev *dev)
 {
-        if (dev != NULL)
-        {
+        if (dev != NULL) {
                 device_destroy(sd_class, dev->devno);
                 cdev_del(&dev->cdev);
         }
 }
 
-static void sd_cleanup_device(void)
+/* Destroy all */
+static void sd_cleanup_driver(int ndev)
 {
+        unsigned int i;
+
+        if (sd_dev) {
+                for (i = 0; i < ndev; ++i) {
+                        uart_clean(&sd_dev[i]);
+                        sd_destroy_device(&sd_dev[i]);
+                }
+                kfree(sd_dev);
+        }
         if (sd_class != NULL)
                 class_destroy(sd_class);
-        unregister_chrdev_region(sd_data->devno, 1);
+        unregister_chrdev_region(MKDEV(sd_major, 0), sd_ndevs);
 }
 
 /* Register char device (dynamic major).
  * Create device class.
- * The *major parameter is updated with major number.
  */
-static int sd_setup_device(int *major)
+static int sd_create_driver(void)
 {
         int err = 0;
         dev_t first;
 
-        /* Start with minor 0, register 1 device */
-        err = alloc_chrdev_region(&first, 0, 1, KBUILD_MODNAME);
+        /* Start with minor 0, register n devices */
+        err = alloc_chrdev_region(&first, 0, sd_ndevs, KBUILD_MODNAME);
         if (err < 0) {
                 PR_WARNING(SD_ERR_MAJOR);
                 return err;
         }
 
-        *major = MAJOR(first);
+        sd_major = MAJOR(first);
 
         sd_class = class_create(THIS_MODULE, KBUILD_MODNAME);
         if (IS_ERR(sd_class)) {
                 err = PTR_ERR(sd_class);
-                sd_cleanup_device();
                 return err;
         }
         return 0;
 }
 
-static int sd_register_device(void)
+static int sd_register_devices(void)
 {
         int err = 0;
-        int major = 0;
+        int i;
 
-        if ((err = sd_setup_device(&major))) {
+        if ((err = sd_create_driver())) {
+                if (sd_major)
+                        sd_cleanup_driver(0);
                 return err;
         }
-        if ((err = sd_alloc_device(&sd_data))) {
-                sd_cleanup_device();
+        if ((err = sd_alloc_devices(&sd_dev))) {
+                sd_cleanup_driver(0);
                 return err;
         }
-        if ((err = sd_create_device(sd_data, major, 0, sd_class))) {
-                sd_free_device(sd_data);
-                sd_cleanup_device();
-                return err;
+        for (i = 0; i < sd_ndevs; ++i) {
+                if ((err = sd_create_device(&sd_dev[i], i))) {
+                        sd_cleanup_driver(i);
+                        return err;
+                }
+                PR_INFO("%d:%d", MAJOR(sd_dev[i].devno), MINOR(sd_dev[i].devno));
         }
-        PR_INFO("%d:%d", MAJOR(sd_data->devno), MINOR(sd_data->devno));
         return err;
 }
 
-static void sd_unregister_device(void)
+static void sd_unregister_devices(void)
 {
-        sd_destroy_device(sd_data);
-        sd_free_device(sd_data);
-        sd_cleanup_device();
+        sd_cleanup_driver(sd_ndevs);
 }
 
 /* ************************************************************* */
 
 static int __init sd_init_module(void)
 {
-        int err = 0;
-
         PR_INFO(SD_INFO_LOAD);
-        err = sd_register_device();
-        if (err < 0) {
-                return err;
-        }
-        err = uart_config();
-        if (err < 0) {
-                PR_WARNING(SD_ERR_UARTFAIL);
-                return err;
-        }
-
-        return err;
+        return sd_register_devices();
 }
 
 static void __exit sd_exit_module(void)
 {
         PR_INFO(SD_INFO_UNLOAD);
-        uart_clean();
-        sd_unregister_device();
+        sd_unregister_devices();
 }
 
 module_init(sd_init_module);
