@@ -5,7 +5,7 @@
 ** Contact <contact@xsyann.com>
 **
 ** Started on  Wed Apr  9 14:07:16 2014 xsyann
-** Last update Mon Apr 14 20:25:08 2014 xsyann
+** Last update Tue Apr 15 10:08:41 2014 xsyann
 */
 
 #include <linux/kernel.h>
@@ -30,9 +30,8 @@ MODULE_VERSION(SD_VERSION);
 static struct class *sd_class = NULL;   /* Device class (/sys/class) */
 static struct sd_data *sd_data = NULL;    /* Device wrapper */
 
-static int port = 0x2f8; // COM2
+static int port = 0x2f8; /* COM2 */
 static int irq = 3;
-
 
 static int sd_open(struct inode *inode, struct file *filp)
 {
@@ -199,7 +198,7 @@ static int uart_config(void)
 
         outb(UART_LCR_WLEN8 | UART_LCR_DLAB, port + UART_LCR);
         outb(0x01, port + UART_DLL);
-        outb(0x00, port + UART_DLL);
+        outb(0x00, port + UART_DLM);
         outb(UART_LCR_WLEN8, port + UART_LCR);
 
         outb(UART_MCR_DTR | UART_MCR_RTS, port + UART_MCR);
