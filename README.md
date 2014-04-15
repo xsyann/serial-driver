@@ -9,7 +9,8 @@ A simple serial driver developed for the linux kernel 3.11.10 [EOL].
     git clone https://github.com/4ppolo/serial-driver.git
   
 ####Set udev permissions
-    echo 'KERNEL=="serial_driver", NAME=="serial_driver", MODE="666"' | sudo tee -a /etc/udev/rules.d/50-udev.rules
+    echo 'KERNEL=="serial_driver*", NAME=="%k", MODE="666"' | sudo tee -a /etc/udev/rules.d/50-udev.rules
+    sudo udevadm control --reload-rules
   
 ####Make & Load module
     make
