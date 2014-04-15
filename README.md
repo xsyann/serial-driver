@@ -7,15 +7,15 @@ A simple serial driver developed for the linux kernel 3.11.10 [EOL].
 
 ####Clone sources
     git clone https://github.com/4ppolo/serial-driver.git
-  
+
 ####Set udev permissions
     echo 'KERNEL=="serial_driver*", NAME=="%k", MODE="666"' | sudo tee -a /etc/udev/rules.d/50-udev.rules
     sudo udevadm control --reload-rules
-  
+
 ####Make & Load module
     make
     make load
-  
+
 ##Uninstall
     make unload
 
@@ -34,10 +34,10 @@ http://www.dest-unreach.org/socat/download/socat-2.0.0-b7.tar.gz
     mv tmp.c xio-ip6.c
     make
     make install
-  
+
 ## Install Cutecom on guest
     sudo apt-get install cutecom
-  
+
 ## Test
 
 ####Configure VM serial port
@@ -72,6 +72,3 @@ http://www.dest-unreach.org/socat/download/socat-2.0.0-b7.tar.gz
     1: port: 000002F8 irq: 3 tx:0 rx:0
     2: port: 000003E8 irq: 4 tx:0 rx:0
     3: port: 000002E8 irq: 3 tx:0 rx:0
-
-  
-  
