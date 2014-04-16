@@ -5,7 +5,7 @@
 ## Contact <contact@xsyann.com>
 ##
 ## Started on  Wed Apr  9 14:05:43 2014 xsyann
-## Last update Mon Apr 14 20:45:54 2014 xsyann
+## Last update Wed Apr 16 11:37:10 2014 xsyann
 ##
 
 TARGET	= serial_driver
@@ -23,7 +23,9 @@ clean	:
 	$(MAKE) -C $(KDIR) M=$(PWD) clean
 
 load	:
-	sudo insmod ./$(TARGET).ko
+	@sudo rmmod ./$(TARGET).ko 2> /dev/null; sudo insmod ./$(TARGET).ko
+	@echo "Load $(TARGET).ko"
 
 unload	:
-	sudo rmmod ./$(TARGET).ko
+	@sudo rmmod ./$(TARGET).ko
+	@echo "Unload $(TARGET).ko"
