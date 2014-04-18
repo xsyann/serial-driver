@@ -5,7 +5,7 @@
 ** Contact <contact@xsyann.com>
 **
 ** Started on  Wed Apr  9 14:07:16 2014 xsyann
-** Last update Tue Apr 15 22:14:49 2014 xsyann
+** Last update Fri Apr 18 22:02:36 2014 xsyann
 */
 
 #include <linux/kernel.h>
@@ -163,7 +163,7 @@ static ssize_t sd_write(struct file *filp, const char __user *buf,
         }
 
         /* Lock */
-        if (mutex_lock_interruptible(&dev->read_mutex))
+        if (mutex_lock_interruptible(&dev->write_mutex))
                 return -EINTR;
         /* Write */
         copied = 0;
@@ -178,7 +178,7 @@ static ssize_t sd_write(struct file *filp, const char __user *buf,
         }
         dev->tx += copied;
         /* Unlock */
-        mutex_unlock(&dev->read_mutex);
+        mutex_unlock(&dev->write_mutex);
         return copied;
 }
 
